@@ -145,6 +145,20 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 
 body.noviz .run{display:none}
 
+/* Pattern result */
+.pat{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;margin-top:6px}
+.pl{display:grid;gap:10px;font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.pl span{height:24px;display:flex;align-items:center}
+.pscroll{overflow-x:auto;padding-bottom:4px}
+.prow{display:flex;gap:8px;width:max-content}
+.pc{display:grid;gap:10px;justify-items:start}
+.pb{display:block;height:24px;border-radius:12px}
+.pb.ref{background:var(--muted);opacity:.55}
+.pb.ok{background:var(--good)}
+.pb.bad{background:var(--forbid)}
+.pb.miss{border:2px dashed var(--forbid);box-sizing:border-box}
+.pb.gap{background:transparent}
+
 /* Pads */
 .pads{position:sticky;bottom:0;z-index:4;background:linear-gradient(to bottom,transparent,var(--bg) 18px);padding-top:18px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:1fr;gap:14px}
 .pad{touch-action:none;user-select:none;-webkit-user-select:none;border:0;border-radius:28px;height:clamp(110px,20vh,180px);background:var(--accent);color:var(--accent-ink);font-family:var(--f-display);font-size:26px;font-weight:700;cursor:pointer;box-shadow:inset 0 -8px 0 rgba(0,0,0,.18);transition:transform .08s, filter .08s}
@@ -551,17 +565,30 @@ function toSymbols(t){
   return iv.map(x=>{const q=x/u;return q<1.45?0:q<2.6?1:2;});
 }
 function comparePattern(refT,kidT){
-  const rs=toSymbols(refT),ks=toSymbols(kidT);
-  const n=rs.length,m=ks.length,D=[...Array(n+1)].map(()=>new Array(m+1).fill(0));
-  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=rs[i-1]===ks[j-1]?D[i-1][j-1]+1:Math.max(D[i-1][j],D[i][j-1]);
-  const rOk=new Array(n).fill(false),kOk=new Array(m).fill(false);
-  if(n===m){for(let i=0;i<n;i++)rOk[i]=kOk[i]=rs[i]===ks[i];}
-  else for(let i=n,j=m;i>0&&j>0;){if(rs[i-1]===ks[j-1]&&D[i][j]===D[i-1][j-1]+1){rOk[i-1]=kOk[j-1]=true;i--;j--;}else if(D[i-1][j]>=D[i][j-1])i--;else j--;}
-  const hits=n===m?rOk.filter(Boolean).length:D[n][m],total=Math.max(n,m,1);
-  // рисунок для экрана: шаг 1 / 2 / 3 клетки по знаку, без настоящего времени
-  const pos=sy=>{const p=[0];sy.forEach(v=>p.push(p[p.length-1]+[1,2,3][v]));return p;};
-  return {hits,total,perfect:n===m&&hits===n,score:Math.round(100*hits/total),rs,ks,
-    rn:pos(rs),kn:pos(ks),refOk:[n===0||rOk[0]].concat(rOk),kidOk:[m===0||kOk[0]].concat(kOk),nRef:refT.length,nKid:kidT.length};
+  const rs=toSymbols(refT),ks=toSymbols(kidT),n=rs.length,m=ks.length;
+  // выравнивание: совпадение, замена, пропуск, лишний
+  const D=[...Array(n+1)].map((_,i)=>[...Array(m+1)].map((_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=Math.min(D[i-1][j-1]+(rs[i-1]===ks[j-1]?0:1),D[i-1][j]+1,D[i][j-1]+1);
+  const al=[];
+  for(let i=n,j=m;i>0||j>0;){
+    if(i>0&&j>0&&D[i][j]===D[i-1][j-1]+(rs[i-1]===ks[j-1]?0:1)){al.unshift({r:rs[i-1],k:ks[j-1]});i--;j--;}
+    else if(i>0&&D[i][j]===D[i-1][j]+1){al.unshift({r:rs[i-1],k:null});i--;}
+    else{al.unshift({r:null,k:ks[j-1]});j--;}
+  }
+  const hits=al.filter(x=>x.r!=null&&x.r===x.k).length,total=Math.max(n,m,1);
+  return {al,hits,total,perfect:n===m&&hits===n,score:Math.round(100*hits/total),
+    missing:al.filter(x=>x.k==null).length,extra:al.filter(x=>x.r==null).length,wrong:al.filter(x=>x.r!=null&&x.k!=null&&x.r!==x.k).length};
+}
+function patternHTML(P){
+  const W=[22,46,70];
+  const blk=(v,cls)=>v==null?`<i class="pb gap"></i>`:`<i class="pb ${cls}" style="width:${W[v]}px"></i>`;
+  const cols=P.al.map(x=>{
+    const w=Math.max(x.r==null?0:W[x.r],x.k==null?0:W[x.k]);
+    const kc=x.k==null?"":x.r==null?"bad":x.r===x.k?"ok":"bad";
+    const kid=x.k==null?`<i class="pb miss" style="width:${W[x.r]}px"></i>`:blk(x.k,kc);
+    return `<div class="pc" style="width:${w}px">${x.r==null?`<i class="pb gap"></i>`:blk(x.r,"ref")}${kid}</div>`;
+  }).join("");
+  return `<div class="pat"><div class="pl"><span>Образец</span><span>Ребёнок</span></div><div class="pscroll"><div class="prow">${cols}</div></div></div>`;
 }
 
 /* ---------- navigation ---------- */
@@ -682,21 +709,17 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
     const lines=[`<span class="score">${R.hits} из ${R.r.length}${R.extra.length?` · лишних ${R.extra.length}`:""}</span>`];
         if(R.r.length>1&&R.k.length>1){const p=Math.round((R.ratio-1)*100);
       if(Math.abs(p)>=8)lines.push(`Темп: ${p>0?"медленнее":"быстрее"} на ${Math.abs(p)}%`);}
-    resultBox($("m1res"),cls,title,lines);st.textContent=title;sub.textContent="";
+    resultBox($("m1res"),cls,title,lines);st.textContent=R.perfect?"Молодец!":"Ещё раз?";sub.textContent="";
   }
   function finishPattern(){
     const P=comparePattern(M.ref.t,M.taps);
-    const span=Math.max(P.rn[P.rn.length-1]||1,P.kn[P.kn.length-1]||1)+.6;
-    $("m1run").hidden=true;
-    const g=[];for(let i=0;i<=Math.floor(span);i++)g.push({x:i});
-    timeline(tl,{span,grid:g,rows:[
-      {label:"Образец",marks:P.rn.map((x,i)=>({x,cls:P.refOk[i]?"hit":"miss"}))},
-      {label:"Ребёнок",marks:P.kn.map((x,j)=>({x,cls:P.kidOk[j]?"kid":"extra"}))}]});
+    $("m1run").hidden=true;timeline(tl,{rows:[]});
     const [cls,title]=P.perfect?["good","Рисунок совпал!"]:verdict(P.score,false);
     voice(ac().currentTime+.05,P.perfect?"good":"bad");
-    const lines=[];
-    if(!P.perfect){lines.push(P.nKid!==P.nRef?`Ударов ${P.nKid}, а нужно ${P.nRef}`:`Совпало: ${P.hits} из ${P.total}`);}
-    resultBox($("m1res"),cls,title,lines);st.textContent=title;sub.textContent="";
+    const bits=[];
+    if(P.wrong)bits.push(`ошибок: ${P.wrong}`);if(P.missing)bits.push(`пропущено: ${P.missing}`);if(P.extra)bits.push(`лишних: ${P.extra}`);
+    $("m1res").innerHTML=`<div class="result ${cls}"><h3>${title}</h3>${bits.length?`<p>${bits.join(" · ")}</p>`:""}${patternHTML(P)}</div>`;
+    st.textContent=P.perfect?"Молодец!":"Ещё раз?";sub.textContent="";
   }
   SCREENS.m1={hintsChanged(){if(M.state==="idle"&&!$("m1res").innerHTML)drawRef();},enter(){fillSelect($("m1pick"));if(M.src==="lib")refFromLib();drawRef();setState("idle");},leave(){if(M.state!=="idle")setState("idle");}};
 })();
