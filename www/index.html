@@ -539,23 +539,29 @@ function compareFree(refT,kidT,tolFrac,tempoFree){
   return Object.assign(m,{ratio,unit,r});
 }
 function gridScore(refBeats,kidBeats,tol){return alignMatch(refBeats,kidBeats,tol);}
-/* проверка по рисунку: сравниваем только соотношения промежутков между ударами */
+/* проверка по рисунку: время не учитывается. Каждый промежуток между ударами
+   превращается в знак — короткий, длинный, очень длинный — относительно самого короткого
+   промежутка этого же исполнителя. Сравниваются только знаки. */
+const PSYM=["короткий","длинный","очень длинный"];
+function toSymbols(t){
+  const iv=t.slice(1).map((x,i)=>x-t[i]);if(!iv.length)return [];
+  const sorted=[...iv].sort((a,b)=>a-b);
+  // основа — самый короткий промежуток, но не случайный «дребезг»: берём медиану нижней группы
+  const low=sorted.filter(x=>x<sorted[0]*1.4);const u=median(low)||sorted[0];
+  return iv.map(x=>{const q=x/u;return q<1.45?0:q<2.6?1:2;});
+}
 function comparePattern(refT,kidT){
-  const r=refT.slice(1).map((x,i)=>x-refT[i]),k=kidT.slice(1).map((x,i)=>x-kidT[i]);
-  const cats=[];r.forEach(x=>{if(!cats.some(c=>Math.abs(Math.log(x/c))<0.18))cats.push(x);});
-  const sym=x=>{let bi=-1,bd=Infinity;cats.forEach((c,i)=>{const d=Math.abs(Math.log(x/c));if(d<bd){bd=d;bi=i;}});return bd<Math.log(1.42)?bi:-1;};
-  let s=1;
-  if(k.length&&r.length){s=k.length===r.length?median(k.map((x,i)=>x/r[i])):median(k)/median(r);}
-  const rs=r.map(sym),ks=k.map(x=>sym(x/s));
-  // наибольшая общая подпоследовательность
+  const rs=toSymbols(refT),ks=toSymbols(kidT);
   const n=rs.length,m=ks.length,D=[...Array(n+1)].map(()=>new Array(m+1).fill(0));
-  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=rs[i-1]===ks[j-1]&&rs[i-1]>=0?D[i-1][j-1]+1:Math.max(D[i-1][j],D[i][j-1]);
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=rs[i-1]===ks[j-1]?D[i-1][j-1]+1:Math.max(D[i-1][j],D[i][j-1]);
   const rOk=new Array(n).fill(false),kOk=new Array(m).fill(false);
-  for(let i=n,j=m;i>0&&j>0;){if(rs[i-1]===ks[j-1]&&rs[i-1]>=0&&D[i][j]===D[i-1][j-1]+1){rOk[i-1]=kOk[j-1]=true;i--;j--;}else if(D[i-1][j]>=D[i][j-1])i--;else j--;}
-  const hits=D[n][m],total=Math.max(n,m,1);
-  const kn=kidT.map(x=>(x-kidT[0])/s),rn=refT.map(x=>x-refT[0]);
-  return {hits,total,perfect:n===m&&hits===n,score:Math.round(100*hits/total),
-    refOk:rn.map((_,i)=>i===0?(rOk[0]||n===0):rOk[i-1]),kidOk:kn.map((_,j)=>j===0?(kOk[0]||m===0):kOk[j-1]),rn,kn,ratio:s,nRef:refT.length,nKid:kidT.length};
+  if(n===m){for(let i=0;i<n;i++)rOk[i]=kOk[i]=rs[i]===ks[i];}
+  else for(let i=n,j=m;i>0&&j>0;){if(rs[i-1]===ks[j-1]&&D[i][j]===D[i-1][j-1]+1){rOk[i-1]=kOk[j-1]=true;i--;j--;}else if(D[i-1][j]>=D[i][j-1])i--;else j--;}
+  const hits=n===m?rOk.filter(Boolean).length:D[n][m],total=Math.max(n,m,1);
+  // рисунок для экрана: шаг 1 / 2 / 3 клетки по знаку, без настоящего времени
+  const pos=sy=>{const p=[0];sy.forEach(v=>p.push(p[p.length-1]+[1,2,3][v]));return p;};
+  return {hits,total,perfect:n===m&&hits===n,score:Math.round(100*hits/total),rs,ks,
+    rn:pos(rs),kn:pos(ks),refOk:[n===0||rOk[0]].concat(rOk),kidOk:[m===0||kOk[0]].concat(kOk),nRef:refT.length,nKid:kidT.length};
 }
 
 /* ---------- navigation ---------- */
@@ -595,7 +601,8 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
   function drawRef(){
     timeline(tl,{rows:[]});const run=$("m1run");run.hidden=false;
     if(!M.ref){runDraw(run,{on:[],len:1});return;}
-    runDraw(run,{on:S.settings.hints?M.ref.t:[],len:M.ref.span,grid:M.ref.grid,done:true});
+    const pat=S.settings.chk==="pat";
+    runDraw(run,{on:S.settings.hints&&!pat?M.ref.t:[],len:M.ref.span,grid:pat?[]:M.ref.grid,done:true});
   }
   function refFromLib(){
     const r=byId($("m1pick").value);if(!r){M.ref=null;return;}
@@ -637,7 +644,8 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
     const c=ac(),t0=c.currentTime+.15,ol=outLat();
     if(M.ref.beats&&S.settings.met)metro(t0,Math.ceil(M.ref.beats.len));
     M.ref.t.forEach(x=>{voice(t0+x,"play");vq(t0+x+ol,()=>lampFlash("m1lamp"));});
-    runPlay($("m1run"),{on:M.ref.t,len:M.ref.span,grid:M.ref.grid,t0,unit:1,reveal:!S.settings.hints});
+    const patm=S.settings.chk==="pat";
+    runPlay($("m1run"),{on:M.ref.t,len:M.ref.span,grid:patm?[]:M.ref.grid,t0,unit:1,reveal:patm||!S.settings.hints,fade:patm});
     M.end=t0+M.ref.span+ol;setState("playing");st.textContent="Слушай…";
     tickFn=()=>{if(ac().currentTime>=M.end){tickFn=null;setState("idle");st.textContent="Твоя очередь";}};
   }
@@ -647,7 +655,7 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
     const c=ac(),b=60/S.settings.bpm,pat=S.settings.chk==="pat";let t=c.currentTime+.15;
     if(!pat){if(S.settings.ci){metro(t,4);t+=4*b;}if(S.settings.met)metro(t,64,0);}
     M.kidStart=pat?0:t-b*.3;M.lastTap=0;M.recBegan=c.currentTime;M.k0=null;M.maxI=0;M.sc=1;setState("kidRec");
-    runDraw($("m1run"),{on:S.settings.hints?M.ref.t:[],len:M.ref.span,grid:pat?[]:M.ref.grid,done:true});
+    runDraw($("m1run"),{on:S.settings.hints&&!pat?M.ref.t:[],len:M.ref.span,grid:pat?[]:M.ref.grid,done:true});
     st.textContent=pat?"Стучи, когда готов":S.settings.ci?"Раз, два, три, четыре…":"Повторяй!";sub.textContent="";
     if(!pat&&S.settings.ci)vq(t+outLat(),()=>{st.textContent="Повторяй!";});
     tapHandler=(tt)=>{if(tt<M.kidStart)return;const prev=M.taps[M.taps.length-1];if(prev!=null)M.maxI=Math.max(M.maxI,tt-prev);M.taps.push(tt);M.lastTap=ac().currentTime;if(M.k0==null)M.k0=tt;
@@ -655,6 +663,7 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
       runTap($("m1run"),(tt-M.k0)/(pat?(M.sc||1):1));};
     tickFn=()=>{const n=ac().currentTime;const refMax=Math.max(...M.ref.t.slice(1).map((x,i)=>x-M.ref.t[i]),.4);
       const quiet=pat?Math.max(1.5,2*Math.max(M.maxI,.4)):Math.max(1.5,2*refMax);
+      if(pat){if(M.taps.length>=M.ref.t.length&&n-M.lastTap>1.2)finishKid();return;}
       const done=M.taps.length>=M.ref.t.length&&n-M.lastTap>Math.max(.9,1.4*Math.max(M.maxI,refMax*.6));
       if(M.taps.length&&(n-M.lastTap>quiet||done))finishKid();
       else if(!M.taps.length&&n-M.recBegan>15){stopAll();tapHandler=null;tickFn=null;setState("idle");st.textContent="Ударов не было";}};
@@ -677,15 +686,16 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
   }
   function finishPattern(){
     const P=comparePattern(M.ref.t,M.taps);
-    const span=Math.max(M.ref.span,(P.kn[P.kn.length-1]||0)+.3);
+    const span=Math.max(P.rn[P.rn.length-1]||1,P.kn[P.kn.length-1]||1)+.6;
     $("m1run").hidden=true;
-    timeline(tl,{span,grid:[],rows:[
+    const g=[];for(let i=0;i<=Math.floor(span);i++)g.push({x:i});
+    timeline(tl,{span,grid:g,rows:[
       {label:"Образец",marks:P.rn.map((x,i)=>({x,cls:P.refOk[i]?"hit":"miss"}))},
       {label:"Ребёнок",marks:P.kn.map((x,j)=>({x,cls:P.kidOk[j]?"kid":"extra"}))}]});
     const [cls,title]=P.perfect?["good","Рисунок совпал!"]:verdict(P.score,false);
     voice(ac().currentTime+.05,P.perfect?"good":"bad");
     const lines=[];
-    if(!P.perfect){lines.push(P.nKid!==P.nRef?`Ударов ${P.nKid}, а нужно ${P.nRef}`:`Верных промежутков: ${P.hits} из ${P.total}`);}
+    if(!P.perfect){lines.push(P.nKid!==P.nRef?`Ударов ${P.nKid}, а нужно ${P.nRef}`:`Совпало: ${P.hits} из ${P.total}`);}
     resultBox($("m1res"),cls,title,lines);st.textContent=title;sub.textContent="";
   }
   SCREENS.m1={hintsChanged(){if(M.state==="idle"&&!$("m1res").innerHTML)drawRef();},enter(){fillSelect($("m1pick"));if(M.src==="lib")refFromLib();drawRef();setState("idle");},leave(){if(M.state!=="idle")setState("idle");}};
