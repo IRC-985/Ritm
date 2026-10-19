@@ -217,6 +217,7 @@ table.res td{padding:6px 4px;border-top:1px solid var(--line);vertical-align:top
     <button aria-pressed="false" data-v="lib">Из библиотеки</button>
   </div>
   <select id="m1pick" hidden aria-label="Ритм из библиотеки"></select>
+  <div class="seg" id="m1chk"><button data-v="pat">По рисунку</button><button data-v="time">По времени</button></div>
   <div class="stage"><div class="lamp" id="m1lamp"></div><div><div class="status" id="m1status">Запишите образец</div><div class="sub" id="m1sub"></div><div class="beats" data-beats></div></div></div>
   <div class="run" id="m1run"></div>
   <div id="m1tl"></div>
@@ -350,8 +351,9 @@ const PRESETS=(function(){
   return out.slice(0,100).map((x,i)=>({id:"r"+(i+1),num:i+1,name:x.name?`№${i+1} · ${x.name}`:`№${i+1}`,cards:x.cards,level:x.level,preset:true}));
 })();
 
-const S={settings:{bpm:80,met:true,ci:true,tol:0.17,lat:60,tf:true,hints:true,sym:"pic",viz:true,level:1},user:[]};
+const S={settings:{bpm:80,met:true,ci:true,tol:0.17,lat:60,tf:true,hints:true,sym:"pic",viz:true,level:1,chk:"pat"},user:[]};
 try{const s=JSON.parse(localStorage.getItem("rt.settings")||"null"); if(s) Object.assign(S.settings,s);}catch(e){}
+if(!S.settings.v2){S.settings.tol=0.25;S.settings.v2=1;}
 try{const u=JSON.parse(localStorage.getItem("rt.user")||"null"); if(Array.isArray(u)) S.user=u;}catch(e){}
 function persist(){try{localStorage.setItem("rt.settings",JSON.stringify(S.settings));localStorage.setItem("rt.user",JSON.stringify(S.user));}catch(e){}}
 const lib=()=>PRESETS.concat(S.user);
@@ -522,15 +524,39 @@ function matchOnsets(ref,kid,tol){
   return {res,extra,hits,used,score:Math.round(100*hits/Math.max(ref.length,kid.length,1)),perfect:hits===ref.length&&!extra.length};
 }
 function median(a){if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y);const m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+/* сдвигаем ответ на его среднюю задержку: постоянное опоздание телефона не считается ошибкой */
+function alignMatch(ref,kid,tol){
+  const m0=matchOnsets(ref,kid,tol*1.8);const errs=m0.res.filter(x=>x.hit).map(x=>x.err);
+  const sh=errs.length?median(errs):0;const k2=kid.map(x=>x-sh);
+  const m=matchOnsets(ref,k2,tol);m.k=k2;m.shift=sh;return m;
+}
 function compareFree(refT,kidT,tolFrac,tempoFree){
   const r=refT.map(x=>x-refT[0]);let k=kidT.length?kidT.map(x=>x-kidT[0]):[];
-  const iois=r.slice(1).map((x,i)=>x-r[i]);const unit=Math.max(.18,median(iois)||.5);
+  const iois=r.slice(1).map((x,i)=>x-r[i]);const unit=Math.max(.3,median(iois)||.5);
   let ratio=1;const rs=r[r.length-1]||0,ks=k[k.length-1]||0;
   if(r.length>1&&k.length>1&&rs>0&&ks>0){ratio=ks/rs;if(tempoFree)k=k.map(x=>x/ratio);}
-  const m=matchOnsets(r,k,tolFrac*unit);
-  return Object.assign(m,{ratio,unit,r,k});
+  const m=alignMatch(r,k,tolFrac*unit);
+  return Object.assign(m,{ratio,unit,r});
 }
-function gridScore(refBeats,kidBeats,tol){return matchOnsets(refBeats,kidBeats,tol);}
+function gridScore(refBeats,kidBeats,tol){return alignMatch(refBeats,kidBeats,tol);}
+/* проверка по рисунку: сравниваем только соотношения промежутков между ударами */
+function comparePattern(refT,kidT){
+  const r=refT.slice(1).map((x,i)=>x-refT[i]),k=kidT.slice(1).map((x,i)=>x-kidT[i]);
+  const cats=[];r.forEach(x=>{if(!cats.some(c=>Math.abs(Math.log(x/c))<0.18))cats.push(x);});
+  const sym=x=>{let bi=-1,bd=Infinity;cats.forEach((c,i)=>{const d=Math.abs(Math.log(x/c));if(d<bd){bd=d;bi=i;}});return bd<Math.log(1.42)?bi:-1;};
+  let s=1;
+  if(k.length&&r.length){s=k.length===r.length?median(k.map((x,i)=>x/r[i])):median(k)/median(r);}
+  const rs=r.map(sym),ks=k.map(x=>sym(x/s));
+  // наибольшая общая подпоследовательность
+  const n=rs.length,m=ks.length,D=[...Array(n+1)].map(()=>new Array(m+1).fill(0));
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++)D[i][j]=rs[i-1]===ks[j-1]&&rs[i-1]>=0?D[i-1][j-1]+1:Math.max(D[i-1][j],D[i][j-1]);
+  const rOk=new Array(n).fill(false),kOk=new Array(m).fill(false);
+  for(let i=n,j=m;i>0&&j>0;){if(rs[i-1]===ks[j-1]&&rs[i-1]>=0&&D[i][j]===D[i-1][j-1]+1){rOk[i-1]=kOk[j-1]=true;i--;j--;}else if(D[i-1][j]>=D[i][j-1])i--;else j--;}
+  const hits=D[n][m],total=Math.max(n,m,1);
+  const kn=kidT.map(x=>(x-kidT[0])/s),rn=refT.map(x=>x-refT[0]);
+  return {hits,total,perfect:n===m&&hits===n,score:Math.round(100*hits/total),
+    refOk:rn.map((_,i)=>i===0?(rOk[0]||n===0):rOk[i-1]),kidOk:kn.map((_,j)=>j===0?(kOk[0]||m===0):kOk[j-1]),rn,kn,ratio:s,nRef:refT.length,nKid:kidT.length};
+}
 
 /* ---------- navigation ---------- */
 const TITLES={home:"Ритм-тренажёр",m1:"Повтори за мной",m2:"Запиши ритм",m3:"Запрещённый ритм",lib:"Библиотека ритмов",set:"Настройки"};
@@ -583,6 +609,9 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
     else{M.ref=null;st.textContent="Запишите образец";sub.textContent="";}
     drawRef();setState("idle");
   });
+  function syncChk(){$("m1chk").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===S.settings.chk));}
+  $("m1chk").querySelectorAll("button").forEach(b=>b.onclick=()=>{if(M.state==="kidRec")return;S.settings.chk=b.dataset.v;persist();syncChk();$("m1res").innerHTML="";drawRef();});
+  syncChk();
   $("m1pick").onchange=()=>{refFromLib();st.textContent="«"+M.ref.name+"»";drawRef();$("m1res").innerHTML="";};
 
   $("m1rec").onclick=()=>{
@@ -615,21 +644,25 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
   $("m1kid").onclick=()=>{
     if(M.state==="kidRec")return finishKid();
     stopAll();$("m1res").innerHTML="";drawRef();M.taps=[];
-    const c=ac(),b=60/S.settings.bpm;let t=c.currentTime+.15;
-    if(S.settings.ci){metro(t,4);t+=4*b;}
-    if(S.settings.met)metro(t,64,0);
-    M.kidStart=t-b*.3;M.lastTap=0;M.recBegan=c.currentTime;M.k0=null;setState("kidRec");
-    runDraw($("m1run"),{on:S.settings.hints?M.ref.t:[],len:M.ref.span,grid:M.ref.grid,done:true});
-    st.textContent=S.settings.ci?"Раз, два, три, четыре…":"Повторяй!";sub.textContent="";
-    if(S.settings.ci)vq(t+outLat(),()=>{st.textContent="Повторяй!";});
-    tapHandler=(tt)=>{if(tt<M.kidStart)return;M.taps.push(tt);M.lastTap=ac().currentTime;if(M.k0==null)M.k0=tt;runTap($("m1run"),tt-M.k0);};
-    tickFn=()=>{const n=ac().currentTime;const quiet=Math.max(1.6,2.2*(M.ref.unit||.5));
-      if(M.taps.length&&n-M.lastTap>quiet)finishKid();
+    const c=ac(),b=60/S.settings.bpm,pat=S.settings.chk==="pat";let t=c.currentTime+.15;
+    if(!pat){if(S.settings.ci){metro(t,4);t+=4*b;}if(S.settings.met)metro(t,64,0);}
+    M.kidStart=pat?0:t-b*.3;M.lastTap=0;M.recBegan=c.currentTime;M.k0=null;M.maxI=0;M.sc=1;setState("kidRec");
+    runDraw($("m1run"),{on:S.settings.hints?M.ref.t:[],len:M.ref.span,grid:pat?[]:M.ref.grid,done:true});
+    st.textContent=pat?"Стучи, когда готов":S.settings.ci?"Раз, два, три, четыре…":"Повторяй!";sub.textContent="";
+    if(!pat&&S.settings.ci)vq(t+outLat(),()=>{st.textContent="Повторяй!";});
+    tapHandler=(tt)=>{if(tt<M.kidStart)return;const prev=M.taps[M.taps.length-1];if(prev!=null)M.maxI=Math.max(M.maxI,tt-prev);M.taps.push(tt);M.lastTap=ac().currentTime;if(M.k0==null)M.k0=tt;
+      if(pat&&M.taps.length===2)M.sc=Math.max(.2,Math.min(5,(M.taps[1]-M.taps[0])/Math.max(.05,M.ref.t[1]-M.ref.t[0])));
+      runTap($("m1run"),(tt-M.k0)/(pat?(M.sc||1):1));};
+    tickFn=()=>{const n=ac().currentTime;const refMax=Math.max(...M.ref.t.slice(1).map((x,i)=>x-M.ref.t[i]),.4);
+      const quiet=pat?Math.max(1.5,2*Math.max(M.maxI,.4)):Math.max(1.5,2*refMax);
+      const done=M.taps.length>=M.ref.t.length&&n-M.lastTap>Math.max(.9,1.4*Math.max(M.maxI,refMax*.6));
+      if(M.taps.length&&(n-M.lastTap>quiet||done))finishKid();
       else if(!M.taps.length&&n-M.recBegan>15){stopAll();tapHandler=null;tickFn=null;setState("idle");st.textContent="Ударов не было";}};
   };
   function finishKid(){
     stopAll();tapHandler=null;tickFn=null;setState("idle");
     if(!M.taps.length){st.textContent="Ударов не было";return;}
+    if(S.settings.chk==="pat")return finishPattern();
     const R=compareFree(M.ref.t,M.taps,S.settings.tol,S.settings.tf);
     const span=Math.max(M.ref.span,(R.k[R.k.length-1]||0)+R.unit*.5);
     $("m1run").hidden=true;
@@ -640,6 +673,19 @@ function verdict(score,perfect){return perfect?["good","Отлично! Ритм
     const lines=[`<span class="score">${R.hits} из ${R.r.length}${R.extra.length?` · лишних ${R.extra.length}`:""}</span>`];
         if(R.r.length>1&&R.k.length>1){const p=Math.round((R.ratio-1)*100);
       if(Math.abs(p)>=8)lines.push(`Темп: ${p>0?"медленнее":"быстрее"} на ${Math.abs(p)}%`);}
+    resultBox($("m1res"),cls,title,lines);st.textContent=title;sub.textContent="";
+  }
+  function finishPattern(){
+    const P=comparePattern(M.ref.t,M.taps);
+    const span=Math.max(M.ref.span,(P.kn[P.kn.length-1]||0)+.3);
+    $("m1run").hidden=true;
+    timeline(tl,{span,grid:[],rows:[
+      {label:"Образец",marks:P.rn.map((x,i)=>({x,cls:P.refOk[i]?"hit":"miss"}))},
+      {label:"Ребёнок",marks:P.kn.map((x,j)=>({x,cls:P.kidOk[j]?"kid":"extra"}))}]});
+    const [cls,title]=P.perfect?["good","Рисунок совпал!"]:verdict(P.score,false);
+    voice(ac().currentTime+.05,P.perfect?"good":"bad");
+    const lines=[];
+    if(!P.perfect){lines.push(P.nKid!==P.nRef?`Ударов ${P.nKid}, а нужно ${P.nRef}`:`Верных промежутков: ${P.hits} из ${P.total}`);}
     resultBox($("m1res"),cls,title,lines);st.textContent=title;sub.textContent="";
   }
   SCREENS.m1={hintsChanged(){if(M.state==="idle"&&!$("m1res").innerHTML)drawRef();},enter(){fillSelect($("m1pick"));if(M.src==="lib")refFromLib();drawRef();setState("idle");},leave(){if(M.state!=="idle")setState("idle");}};
