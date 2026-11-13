@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#16130f" />
+  <title>Плёнка</title>
+  <link rel="icon" href="icon.svg" />
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <div class="brand">Плёнка</div>
+      <button id="btnOpen" class="btn primary">Открыть</button>
+      <div id="fileInfo" class="info"></div>
+      <div class="grow"></div>
+      <button id="btnBefore" class="btn" title="Удерживайте, чтобы увидеть исходник (клавиша \)">До</button>
+      <button id="btnZoom" class="btn" title="Масштаб 1:1">1:1</button>
+      <button id="btnExport" class="btn primary" disabled>Сохранить</button>
+    </header>
+    <main class="work">
+      <section id="viewer" class="viewer">
+        <canvas id="gl"></canvas>
+        <canvas id="overlay"></canvas>
+        <div id="empty" class="empty">
+          <div class="empty-title">Откройте RAW-файл</div>
+          <div class="empty-sub">Sony ARW, Nikon NEF, Fujifilm RAF (в том числе GFX), DNG — а также JPEG, PNG, TIFF.</div>
+          <button id="btnOpen2" class="btn primary big">Выбрать файл</button>
+        </div>
+        <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busyText">Обработка…</div></div>
+        <div id="filmBadge" class="badge"></div>
+      </section>
+      <aside id="panel" class="panel"></aside>
+    </main>
+    <input id="fileInput" type="file" hidden accept=".arw,.srf,.sr2,.nef,.nrw,.raf,.dng,.cr2,.cr3,.orf,.rw2,.pef,.srw,.3fr,.fff,.iiq,.erf,.raw,.rwl,.jpg,.jpeg,.png,.tif,.tiff,.webp,image/*" />
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

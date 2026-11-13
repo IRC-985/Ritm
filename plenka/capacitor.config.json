@@ -1,0 +1,6 @@
+{
+  "appId": "ru.plenka.app",
+  "appName": "Плёнка",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}

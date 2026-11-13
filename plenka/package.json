@@ -1,0 +1,42 @@
+{
+  "name": "plenka",
+  "productName": "Plenka",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Плёнка — физическая симуляция фотоплёнки для RAW",
+  "main": "electron/main.cjs",
+  "author": "Plenka",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "vite build && electron .",
+    "dist:win": "vite build && electron-builder --win nsis portable --x64 --publish never",
+    "android": "vite build && cap sync android",
+    "bake": "python tools/bake.py",
+    "wasm": "bash native/build.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.3",
+    "@capacitor/core": "6.2.3",
+    "@capacitor/filesystem": "6.0.4",
+    "@capacitor/share": "6.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "6.2.3",
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8",
+    "vite": "5.4.11"
+  },
+  "build": {
+    "appId": "ru.plenka.app",
+    "productName": "Plenka",
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["dist/**", "electron/**", "package.json"],
+    "win": { "target": ["nsis", "portable"], "icon": "build/icon.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "artifactName": "Plenka-setup.${ext}" },
+    "portable": { "artifactName": "Plenka-portable.${ext}" }
+  }
+}
