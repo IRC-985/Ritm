@@ -75,9 +75,12 @@ export class Pipeline {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
   }
 
-  // Исходник: half-float RGBA
-  setSource(half, w, h, { mipmap = true } = {}) {
+  // Исходник: half-float RGBA. Без аппаратных мип-уровней (на части телефонов
+  // они не строятся для float-текстур) — свою пирамиду уменьшения делаем шейдером.
+  setSource(half, w, h) {
     const gl = this.gl;
+    if (w > this.maxTex || h > this.maxTex) throw new Error(`Кадр ${w}×${h} больше предела видеокарты ${this.maxTex}`);
+    this._dropSrcLevels();
     if (this.t.src && this.t.src.w === w && this.t.src.h === h) {
       gl.bindTexture(gl.TEXTURE_2D, this.t.src.tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.HALF_FLOAT, half);
@@ -85,12 +88,31 @@ export class Pipeline {
       if (this.t.src) this.k.delete(this.t.src);
       this.t.src = this.k.texture(w, h, { data: half });
     }
-    if (mipmap) {
-      gl.bindTexture(gl.TEXTURE_2D, this.t.src.tex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      gl.generateMipmap(gl.TEXTURE_2D);
-    }
+    const err = gl.getError();
+    if (err) throw new Error('Видеокарта не приняла изображение (ошибка WebGL ' + err + ')');
     this.srcW = w; this.srcH = h;
+  }
+
+  _dropSrcLevels() {
+    if (this.srcLevels) for (const t of this.srcLevels.slice(1)) this.k.delete(t);
+    this.srcLevels = null;
+  }
+
+  // Уровень исходника, у которого область srcRect не меньше, чем нужный вывод
+  _srcFor(w, h, rect) {
+    if (!this.srcLevels) this.srcLevels = [this.t.src];
+    const L = this.srcLevels;
+    for (;;) {
+      const last = L[L.length - 1];
+      const cw = Math.ceil(last.w / 2), ch = Math.ceil(last.h / 2);
+      if (cw * rect[2] < w || ch * rect[3] < h || last.w < 4) break;
+      const t = this.k.texture(cw, ch);
+      this.k.run(this.prog.down, t, { uTex: last });
+      L.push(t);
+    }
+    let best = L[0];
+    for (const t of L) if (t.w * rect[2] >= w * 0.999 && t.h * rect[3] >= h * 0.999) best = t;
+    return best;
   }
 
   // Гауссово размытие с пирамидой уменьшения. levels — кэш уровней для данного входа.
@@ -127,10 +149,11 @@ export class Pipeline {
     const film = P.film;
     // 1. экспонирование
     const E0 = k.acquire(w, h);
-    k.run(pr.expose, E0, { uSrc: this.t.src, uTc: this.t.tc, uStamp: this.t.stamp || this.t.tc }, {
+    const srcRect = o.srcRect || [0, 0, 1, 1];
+    k.run(pr.expose, E0, { uSrc: this._srcFor(w, h, srcRect), uTc: this.t.tc, uStamp: this.t.stamp || this.t.tc }, {
       uIn: o.inMatrix, uTcN: P.tc.N, uExp: o.expMul,
       uVig: [s.vignette || 0, 0.75, 0.45, 0], uGeo: geo, uSize: [w, h], uBoost: s.boost || 0,
-      uSrcRect: o.srcRect || [0, 0, 1, 1],
+      uSrcRect: srcRect,
       uStampRect: o.stamp ? o.stamp.rect : [0, 0, 0, 0], uStampCol: o.stamp ? o.stamp.col : [0, 0, 0],
     });
     const G = o.globals; // крупные размытия, посчитанные по всему кадру (для тайлов)
@@ -225,7 +248,9 @@ export class Pipeline {
   }
 
   before(target, { M, expMul, view = [0, 0, 1, 1], viewport }) {
-    this.k.run(this.prog.before, target, { uSrc: this.t.src }, { uM: M, uExp: expMul, uView: view }, viewport);
+    const vw = viewport ? viewport[2] : this.gl.drawingBufferWidth, vh = viewport ? viewport[3] : this.gl.drawingBufferHeight;
+    const src = this._srcFor(vw, vh, [0, 0, Math.abs(view[2]), Math.abs(view[3])]);
+    this.k.run(this.prog.before, target, { uSrc: src }, { uM: M, uExp: expMul, uView: view }, viewport);
   }
 
   releaseResult(res) {

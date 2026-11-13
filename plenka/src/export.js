@@ -42,7 +42,7 @@ export async function renderFull(pipe, img, ctx, { bits = 8, onProgress = () => 
   const pxUm = ctx.filmMm * 1000 / long;
   // общий проход по уменьшенному кадру — ореол и хвост диффузии ингибиторов
   const g = shrinkU16(data, W, H, 2048);
-  pipe.setSource(regionToHalf(g.data, g.w, 0, 0, g.w, g.h), g.w, g.h, { mipmap: false });
+  pipe.setSource(regionToHalf(g.data, g.w, 0, 0, g.w, g.h), g.w, g.h);
   const gres = pipe.process({ ...ctx.opts, w: g.w, h: g.h, pxUm: ctx.filmMm * 1000 / Math.max(g.w, g.h), keep: true, geo: [0, 0, g.w, g.h] });
   pipe.releaseResult(gres);
   const globals = gres.globals;
@@ -60,7 +60,7 @@ export async function renderFull(pipe, img, ctx, { bits = 8, onProgress = () => 
       const x0 = Math.max(0, cx0 - margin), y0 = Math.max(0, cy0 - margin);
       const x1 = Math.min(W, cx0 + cw + margin), y1 = Math.min(H, cy0 + ch + margin);
       const w = x1 - x0, h = y1 - y0;
-      pipe.setSource(regionToHalf(data, W, x0, y0, w, h), w, h, { mipmap: false });
+      pipe.setSource(regionToHalf(data, W, x0, y0, w, h), w, h);
       const res = pipe.process({
         ...ctx.opts, w, h, pxUm, globals, geo: [x0, y0, W, H],
         grect: [x0 / W, y0 / H, w / W, h / H],

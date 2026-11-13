@@ -71,7 +71,7 @@ self.onmessage = async (ev) => {
     m._free(p);
     let res = { data: img, w, h };
     if (maxSize) {
-      const f = Math.max(1, Math.floor(Math.max(w, h) / maxSize));
+      const f = Math.max(1, Math.ceil(Math.max(w, h) / maxSize));
       res = shrink(res.data, res.w, res.h, f);
     }
     res = orient(res.data, res.w, res.h, meta.flip);

@@ -71,4 +71,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   .panel { border-left: 0; border-top: 1px solid var(--line); }
   .info { max-width: 100%; order: 10; flex-basis: 100%; }
   .brand { font-size: 15px; }
+  .bar { gap: 6px; padding: 6px 8px; }
+  .bar .btn { padding: 7px 10px; }
+  .bar .grow { display: none; }
 }

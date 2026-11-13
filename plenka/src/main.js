@@ -1,8 +1,8 @@
 import {
   loadData, Spectra, buildProcess, mat, PROPHOTO_TO_XYZ, XYZ_TO_PROPHOTO, XYZ_TO_SRGB,
-  adaptation, WHITE_D50, WHITE_D65, filmResponse,
+  adaptation, WHITE_D50, WHITE_D65, filmResponse, cpuPixel, srgbEncode,
 } from './engine/spectral.js';
-import { createGL, u16ToHalfTable } from './engine/gl.js';
+import { createGL, u16ToHalfTable, toHalf } from './engine/gl.js';
 import { Pipeline, FORMATS } from './engine/pipeline.js';
 import { decodeRaw, decodeImage, isRaw } from './raw/decode.js';
 import { renderFull, encodeJpeg, encodeTiff16, shrinkU16 } from './export.js';
@@ -23,7 +23,7 @@ let P = null, chemKey = '', autoEV = 0;
 let showBefore = false;
 let zoom = null;         // null = вписать; иначе {cx, cy} — центр в пикселях рабочего изображения
 let stampKey = '';
-const WORK_MAX = 4096;   // рабочее разрешение для просмотра и лупы
+let WORK_MAX = 4096;     // рабочее разрешение для просмотра и лупы (не больше предела видеокарты)
 
 function persist() {
   try { localStorage.setItem('plenka.settings', JSON.stringify(S)); } catch { /* приватный режим */ }
@@ -189,7 +189,13 @@ let pending = false;
 function schedule() {
   if (pending) return;
   pending = true;
-  requestAnimationFrame(() => { pending = false; draw(); });
+  requestAnimationFrame(() => {
+    pending = false;
+    try { draw(); } catch (e) {
+      console.error(e);
+      if (!schedule.reported) { schedule.reported = true; toast('Ошибка отрисовки: ' + e.message + '. ' + gpuInfo(), 15000); }
+    }
+  });
 }
 
 function draw() {
@@ -381,6 +387,50 @@ function setupInput() {
   new ResizeObserver(() => schedule()).observe(viewer);
 }
 
+// ------------------------------------------------------------ самопроверка видеокарты
+function gpuInfo() {
+  const gl = pipe.gl;
+  const ext = gl.getExtension('WEBGL_debug_renderer_info');
+  const r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  const flags = ['EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'OES_texture_float_linear']
+    .filter((e) => gl.getSupportedExtensions().includes(e)).join(', ');
+  return `${r}; макс. текстура ${pipe.maxTex}; ${flags}`;
+}
+
+function selfTest() {
+  try {
+    ensureChem();
+    const w = 64, h = 48, g = 0.184;
+    const f = new Float32Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) { f[4 * i] = g; f[4 * i + 1] = g; f[4 * i + 2] = g; f[4 * i + 3] = 1; }
+    pipe.setSource(toHalf(f), w, h);
+    const s0 = { ...S, grain: 0, halation: 0, scatter: 0, vignette: 0, boost: 0, sharpen: 0, saturation: 1 };
+    const res = pipe.process({ s: s0, expMul: 1, inMatrix: P.tc.inMatrix, w, h, pxUm: 36000 / w });
+    const t = pipe.k.acquire(w, h, 'u8');
+    pipe.output(res, t, { sharp: 0, encode: true });
+    pipe.releaseResult(res);
+    const px = pipe.k.readPixels(t, w / 2, h / 2, 1, 1);
+    pipe.k.release(t);
+    const got = [px[0], px[1], px[2]].map((v) => v / 255);
+    const exp = cpuPixel(sp, P, [g, g, g], 0).map((v) => srgbEncode(Math.min(1, Math.max(0, v))));
+    const err = Math.max(...got.map((v, i) => Math.abs(v - exp[i])));
+    const glErr = pipe.gl.getError();
+    selfTest.result = { got, exp, err, glErr, info: gpuInfo() };
+    if (err > 0.08 || glErr) {
+      const msg = `Самопроверка видеокарты не прошла: получено ${got.map((v) => v.toFixed(2)).join('/')}, ожидалось ${exp.map((v) => v.toFixed(2)).join('/')}` +
+        (glErr ? `, ошибка WebGL ${glErr}` : '') + `. ${gpuInfo()}`;
+      console.warn(msg);
+      $('empty').querySelector('.empty-sub').textContent = msg;
+      toast(msg, 15000);
+    }
+  } catch (e) {
+    const msg = 'Самопроверка видеокарты: ' + e.message + '. ' + (pipe ? gpuInfo() : '');
+    console.warn(msg);
+    $('empty').querySelector('.empty-sub').textContent = msg;
+    toast(msg, 15000);
+  }
+}
+
 // ------------------------------------------------------------ запуск
 async function start() {
   try {
@@ -389,11 +439,13 @@ async function start() {
     sp = new Spectra(data);
     if (!data.stocks[S.film]) S.film = DEFAULTS.film;
     pipe = new Pipeline(createGL(canvas));
+    WORK_MAX = Math.min(4096, pipe.maxTex);
     rebuildPanel();
     updateBadge();
     setupInput();
     busy(false);
-    window.__plenka = { S, openFile, exportImage, get P() { return P; }, schedule, onChange };
+    selfTest();
+    window.__plenka = { S, openFile, exportImage, get P() { return P; }, schedule, onChange, selfTest };
   } catch (e) {
     console.error(e);
     busy(false);
