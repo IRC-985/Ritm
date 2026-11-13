@@ -70,6 +70,12 @@ function neutralInfo() {
 
 function rebuildPanel() {
   buildPanel(panel, data.stocks, S, onChange, { neutral: neutralInfo });
+  const d = document.createElement('div');
+  d.className = 'hint diag';
+  d.style.padding = '12px 14px';
+  const r = selfTest.result;
+  d.textContent = r ? `Видеокарта: ${r.info}. Самопроверка: ${r.err < 0.08 && !r.glErr ? 'пройдена' : 'НЕ пройдена'} (${r.got.map((v) => v.toFixed(2)).join('/')} при ожидаемых ${r.exp.map((v) => v.toFixed(2)).join('/')}).` : '';
+  panel.appendChild(d);
 }
 
 const CHEM_KEYS = ['film', 'paper', 'push', 'couplers', 'lensFilter', 'sceneIllum', 'paperContrast', 'filterC', 'filterM',
@@ -445,6 +451,7 @@ async function start() {
     setupInput();
     busy(false);
     selfTest();
+    rebuildPanel();
     window.__plenka = { S, openFile, exportImage, get P() { return P; }, schedule, onChange, selfTest };
   } catch (e) {
     console.error(e);

@@ -39,7 +39,10 @@ jobs:
           done
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
       - name: Сборка APK
-        run: cd android && ./gradlew assembleDebug --no-daemon
+        run: |
+          # постоянный отладочный ключ: новые версии ставятся поверх старых
+          mkdir -p ~/.android && cp android-debug.keystore ~/.android/debug.keystore
+          cd android && ./gradlew assembleDebug --no-daemon
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk plenka.apk
       - uses: actions/upload-artifact@v4
         with: { name: plenka-android, path: plenka/plenka.apk }

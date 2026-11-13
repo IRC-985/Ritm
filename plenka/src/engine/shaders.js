@@ -2,6 +2,8 @@
 
 const HEAD = `#version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 precision highp sampler3D;
 in vec2 vUV;
 out vec4 outColor;
